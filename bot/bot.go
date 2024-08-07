@@ -13,9 +13,22 @@ import (
 var BotToken string
 
 type task struct {
+	id       uint
 	name     string
 	finished bool
 	author   string
+}
+
+func printTasks(tasks []task, author string) string {
+	var result string
+	i := 0
+	for _, t := range tasks {
+		if t.author == author {
+			i++
+			result += fmt.Sprintf("%d. %s\n", i, t.name)
+		}
+	}
+	return result
 }
 
 func Run() {
@@ -32,7 +45,18 @@ func Run() {
 		newMessage(d, m, &tasks)
 	})
 
-	discord.Identify.Intents = discordgo.IntentsAllWithoutPrivileged
+	discord.AddHandler(func(s *discordgo.Session, vsu *discordgo.VoiceStateUpdate) {
+		// check if the user left the voice channel
+		if vsu.BeforeUpdate.ChannelID != "" && vsu.ChannelID != "" {
+			// leave the voice channel
+			if vc, ok := s.VoiceConnections[vsu.GuildID]; ok && vc != nil && vc.UserID == vsu.UserID {
+				// disconnect the bot from the voice channel
+				vc.Disconnect()
+			}
+		}
+	})
+
+	discord.Identify.Intents = discordgo.IntentsAllWithoutPrivileged | discordgo.IntentsGuildVoiceStates
 
 	// open session
 	err = discord.Open()
@@ -57,25 +81,51 @@ func newMessage(d *discordgo.Session, m *discordgo.MessageCreate, tasks *[]task)
 
 	switch words[0] {
 	case "!help":
-		d.ChannelMessageSend(m.ChannelID, "Lista komend:\n!dodaj-zadanie <nazwa zadania> - dodaje nowe zadanie")
+		d.ChannelMessageSend(m.ChannelID, "Lista komend:\n!dodaj-zadanie nazwa zadania - dodaje nowe zadanie\n!zadania - wyswietla liste zadan")
 	case "!dodaj-zadanie":
-		if len(words) > 1 {
-			*tasks = append(*tasks, task{name: words[1], finished: false, author: m.Author.Username})
-			d.ChannelMessageSend(m.ChannelID, "Dodano zadanie: "+words[1])
-		} else {
-			d.ChannelMessageSend(m.ChannelID, "Podaj nazwe zadania")
-		}
+		addTask(words, tasks, d, m)
 	case "!zadania":
-		d.ChannelMessageSend(m.ChannelID, printTasks(*tasks, m.Author.Username))
+		d.ChannelMessageSend(m.ChannelID, "Zadania użytkownika "+m.Author.Username+":\n"+printTasks(*tasks, m.Author.Username))
+	case "!dolacz":
+		joinVoiceChannel(d, m)
 	}
 }
 
-func printTasks(tasks []task, author string) string {
-	var result string
-	for i, t := range tasks {
-		if t.author == author {
-			result += fmt.Sprintf("%d. %s\n", i+1, t.name)
+func joinVoiceChannel(d *discordgo.Session, m *discordgo.MessageCreate) {
+
+	guildID := m.GuildID
+
+	var voiceChannelID string
+	guild, err := d.State.Guild(guildID)
+	if err == nil {
+		for _, vs := range guild.VoiceStates {
+			if vs.UserID == m.Author.ID {
+				voiceChannelID = vs.ChannelID
+				break
+			}
 		}
 	}
-	return result
+
+	if voiceChannelID != "" {
+		_, err := d.ChannelVoiceJoin(guildID, voiceChannelID, false, false)
+		if err != nil {
+			d.ChannelMessageSend(m.ChannelID, "Nie udało się dołączyć do kanału głosowego")
+		}
+	} else {
+		d.ChannelMessageSend(m.ChannelID, "Muszisz być na kanale głosowym!")
+	}
+}
+
+func addTask(words []string, tasks *[]task, d *discordgo.Session, m *discordgo.MessageCreate) {
+	if len(words) > 1 {
+		*tasks = append(*tasks, task{
+			name:     words[1],
+			finished: false,
+			author:   m.Author.Username,
+			id:       uint(len(*tasks) + 1),
+		})
+		d.ChannelMessageSend(m.ChannelID, "Dodano zadanie: "+words[1])
+	} else {
+		d.ChannelMessageSend(m.ChannelID, "Podaj nazwe zadania")
+	}
 }
