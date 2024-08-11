@@ -45,17 +45,6 @@ func Run() {
 		newMessage(d, m, &tasks)
 	})
 
-	discord.AddHandler(func(s *discordgo.Session, vsu *discordgo.VoiceStateUpdate) {
-		// check if the user left the voice channel
-		if vsu.BeforeUpdate.ChannelID != "" && vsu.ChannelID != "" {
-			// leave the voice channel
-			if vc, ok := s.VoiceConnections[vsu.GuildID]; ok && vc != nil && vc.UserID == vsu.UserID {
-				// disconnect the bot from the voice channel
-				vc.Disconnect()
-			}
-		}
-	})
-
 	discord.Identify.Intents = discordgo.IntentsAllWithoutPrivileged | discordgo.IntentsGuildVoiceStates
 
 	// open session
